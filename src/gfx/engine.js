@@ -9,11 +9,13 @@ import { Post } from './post.js';
 import { makeNoiseTexture } from './texgen.js';
 import { damp, lerp, clamp } from '../core/math.js';
 
+// `pixels` is the most the picture may hold: a very dense screen (4K at 200 %, a Retina laptop)
+// gets a slightly softer picture rather than a slow one. High holds 2560 x 1600, ultra 3840 x 2160.
 export const QUALITY = {
-  low: { scale: 0.7, msaa: 0, shadow: 1024, shadowFar: 110, vol: false, reflect: false, grass: 0.35, detail: 0.6 },
-  medium: { scale: 0.85, msaa: 0, shadow: 2048, shadowFar: 150, vol: true, reflect: false, grass: 0.65, detail: 0.8 },
-  high: { scale: 1.0, msaa: 4, shadow: 2048, shadowFar: 190, vol: true, reflect: true, grass: 1.0, detail: 1.0 },
-  ultra: { scale: 1.0, msaa: 4, shadow: 4096, shadowFar: 230, vol: true, reflect: true, grass: 1.5, detail: 1.25 },
+  low: { scale: 0.7, pixels: 2.1e6, msaa: 0, shadow: 1024, shadowFar: 110, vol: false, reflect: false, grass: 0.35, detail: 0.6 },
+  medium: { scale: 0.85, pixels: 3.0e6, msaa: 0, shadow: 2048, shadowFar: 150, vol: true, reflect: false, grass: 0.65, detail: 0.8 },
+  high: { scale: 1.0, pixels: 4.2e6, msaa: 4, shadow: 2048, shadowFar: 190, vol: true, reflect: true, grass: 1.0, detail: 1.0 },
+  ultra: { scale: 1.0, pixels: 8.4e6, msaa: 4, shadow: 4096, shadowFar: 230, vol: true, reflect: true, grass: 1.5, detail: 1.25 },
 };
 
 // Layer 0: the world (also seen in the water's reflection). Layer 1: main view only.
@@ -107,7 +109,9 @@ export class Engine {
     const cw = Math.max(2, this.canvas.clientWidth || this.canvas.width),
       ch = Math.max(2, this.canvas.clientHeight || this.canvas.height);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const s = this.q.scale * this.renderScale * dpr;
+    let s = this.q.scale * this.renderScale * dpr;
+    const px = cw * ch * s * s;
+    if (this.q.pixels && px > this.q.pixels) s *= Math.sqrt(this.q.pixels / px);
     const w = Math.max(2, Math.round(cw * s)),
       h = Math.max(2, Math.round(ch * s));
     if (!force && w === this.w && h === this.h) return;
