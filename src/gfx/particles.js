@@ -468,6 +468,13 @@ export class Particles {
     }
   }
   /** A Shade coming apart. */
+  /** A plant taken from the ground: a few motes of its colour let go, and nothing to hide the view. */
+  pluck(x, y, z, color = [1, 0.8, 0.5], n = 14) {
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * 6.283;
+      this.spawn(P.GLOW, x + rr(-0.12, 0.12), y + rr(-0.3, 0.1), z + rr(-0.12, 0.12), Math.cos(a) * rr(0.1, 0.7), rr(0.5, 2), Math.sin(a) * rr(0.1, 0.7), { life: rr(0.7, 1.6), size: rr(0.012, 0.028), color, gain: 6, fade: 0.1, drag: 0.5 });
+    }
+  }
   wisp(x, y, z, color = [0.5, 0.35, 0.8], n = 40) {
     for (let i = 0; i < n; i++) {
       const a = rnd() * 6.283;

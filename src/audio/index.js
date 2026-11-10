@@ -23,6 +23,10 @@
 //   audio.sfx(name, { at }), handle.set(o, at), handle.stop(fade, at), audio.setMusic(mood, { at })
 //   audio.advance(seconds)     schedule music, ambience events and loops up to that time
 //
+// For filming (tools/film.mjs) the engine runs as it does in the game, update() and all, on an
+// OfflineAudioContext that the tool moves forward one frame at a time:
+//   audio.drive(context)       instead of unlock(), before anything has sounded
+//
 // Signal flow:
 //   one-shot / loop -> [air low-pass -> ears] ──> sfx bus ──┐
 //   ui sounds ───────────────────────────────> ui bus ──────┤
@@ -102,8 +106,8 @@ export function createAudio(opts = {}) {
   let E = null; // the running engine
 
   // --- start -------------------------------------------------------------------------------------
-  function start(ctx, offline) {
-    const seed = offline ? opts.seed ?? 1 : ((Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0) || 1;
+  function start(ctx, offline, driven = false) {
+    const seed = offline || driven ? opts.seed ?? 1 : ((Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0) || 1;
     const S = new Synth(ctx, seed);
     const t0 = ctx.currentTime;
 
@@ -141,14 +145,14 @@ export function createAudio(opts = {}) {
     }
 
     let analyser = null;
-    if (!offline) {
+    if (!offline && !driven) {
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       master.connect(analyser);
     }
 
     E = {
-      ctx, S, offline, bus, wet, master, analyser, curtain,
+      ctx, S, offline, driven, bus, wet, master, analyser, curtain,
       born: Date.now(),
       meterBuf: analyser ? new Float32Array(analyser.fftSize) : null,
       voices: [],
@@ -166,7 +170,7 @@ export function createAudio(opts = {}) {
     E.ambience.set(amb, true);
     E.music = createMusic(S, bus.music, wet.music);
     sendMusic(null);
-    if (!offline) {
+    if (!offline && !driven) {
       warm();
       if (typeof document !== 'undefined') document.addEventListener('visibilitychange', settle);
       // A context made outside a user gesture is refused until there is one. Should unlock() have
@@ -189,7 +193,7 @@ export function createAudio(opts = {}) {
    * calling update(), and without this the beds and the drones would go on alone in the dark.
    */
   function settle() {
-    if (!E || E.offline || E.ctx.state === 'closed') return;
+    if (!E || E.offline || E.driven || E.ctx.state === 'closed') return;
     const hidden = typeof document !== 'undefined' && document.hidden && !opts.background;
     if (hidden) {
       if (E.ctx.state === 'running') E.ctx.suspend();
@@ -236,6 +240,12 @@ export function createAudio(opts = {}) {
       }
     }
     settle();
+    return true;
+  }
+  /** Filming: start on a context that a tool renders a frame at a time. Its state is never asked. */
+  function drive(context) {
+    if (E || dead) return false;
+    start(context, false, true);
     return true;
   }
 
@@ -440,7 +450,7 @@ export function createAudio(opts = {}) {
     const now = ctx.currentTime;
     // nothing is queued while the context stands still: it would all go off at once on resume
     // (the first moments after unlock are the exception: the context is only just starting up)
-    if (!offline && ctx.state !== 'running' && (now > 0 || Date.now() - E.born > 700)) return;
+    if (!offline && !E.driven && ctx.state !== 'running' && (now > 0 || Date.now() - E.born > 700)) return;
     let t = o.at ?? now + (offline ? 0.02 : 0.01);
     let g = num(o.gain, 1, 0, 4) * def.k;
     let pos = null,
@@ -624,7 +634,7 @@ export function createAudio(opts = {}) {
   function tick(dt, ahead) {
     const now = E.ctx.currentTime;
     sweep(now);
-    if (E.ctx.state !== 'running') return;
+    if (!E.driven && E.ctx.state !== 'running') return;
     E.ambience.tick(dt, now);
     E.ambience.advance(now + ahead, now);
     E.music.advance(now + ahead + 0.2, now);
@@ -692,7 +702,7 @@ export function createAudio(opts = {}) {
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', settle);
     if (typeof window !== 'undefined') for (const ev of GESTURES) window.removeEventListener(ev, settle, { capture: true });
     if (E && E.pulse) clearInterval(E.pulse);
-    if (E && !E.offline && E.ctx.state !== 'closed') E.ctx.close();
+    if (E && !E.offline && !E.driven && E.ctx.state !== 'closed') E.ctx.close();
     E = null;
     dead = true;
   }
@@ -701,6 +711,7 @@ export function createAudio(opts = {}) {
 
   return {
     unlock: guard('unlock', unlock, false),
+    drive: guard('drive', drive, false),
     setVolumes: guard('setVolumes', setVolumes),
     setListener: guard('setListener', setListener),
     sfx: guard('sfx', sfx),

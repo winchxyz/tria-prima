@@ -185,7 +185,7 @@ export class Quests {
     for (const l of E.lanterns) {
       if (!l.lit && near(l.base, 13)) return has('ember') ? ['lantern2', 'A lantern of the dead. Throw an Ember up into its cage.'] : ['lantern', 'A lantern of the dead, long cold. Fire would wake it.'];
     }
-    if (!F.gate && near(L.gate, 16)) return ['gate', 'Briars have closed the road. Fire would open it.'];
+    if (!F.gate && !(E.gate && E.gate.burning) && near(L.gate, 16)) return ['gate', 'Briars have closed the road. Fire would open it.'];
     if (L.vine && !F.vine && near(L.vine, 10)) return ['vine', 'A sleeping seed at the foot of the wall. Verdance would wake it.'];
     if (L.causeway && !st.inv.primes.mercury) {
       const c = L.causeway;

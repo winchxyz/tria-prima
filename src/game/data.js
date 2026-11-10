@@ -485,4 +485,4 @@ export const PRIME_HUNTS = {
 };
 
 export const GAME_TITLE = 'Tria Prima';
-export const GAME_VERSION = '1.0.0';
+export const GAME_VERSION = '1.1.1';

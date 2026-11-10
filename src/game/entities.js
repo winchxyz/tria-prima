@@ -372,7 +372,7 @@ export class Entities {
     const first = !st.known.ingredients[p.id];
     st.known.ingredients[p.id] = true;
     g.audio.sfx(RARE[p.id] ? 'pickup_rare' : 'pickup', { gain: 0.8 });
-    g.particles.wisp(p.top.x, p.top.y, p.top.z, hexRGB(ing.color), 10);
+    g.particles.pluck(p.top.x, p.top.y, p.top.z, hexRGB(ing.color));
     g.bus.emit('pickup', { kind: 'ingredient', id: p.id, count: n });
     if (first) g.bus.emit('discover', { kind: 'ingredient', id: p.id });
     g.toast('pickup', ing.name, '×1', { kind: 'ingredient', id: p.id });
