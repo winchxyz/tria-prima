@@ -64,7 +64,11 @@ try {
   check('title on screen', (await page.getByText('Begin', { exact: true }).count()) > 0);
   await page.screenshot({ path: path.join(shots, 'p_title.jpg'), type: 'jpeg', quality: 90 });
 
-  await page.getByText('Begin', { exact: true }).first().click();
+  const begin = page.getByText('Begin', { exact: true }).first();
+  const at = await begin.boundingBox();
+  const mx = at.x + at.width / 2,
+    my = at.y + at.height / 2;
+  await page.mouse.click(mx, my);
   await page.waitForTimeout(2500);
   await page.keyboard.press('Space'); // skip the arrival
   await page.waitForTimeout(3000);
@@ -72,8 +76,8 @@ try {
   await page.keyboard.down('KeyW');
   await page.waitForTimeout(2500);
   await page.keyboard.up('KeyW');
-  await page.mouse.move(700, 450);
-  await page.mouse.move(760, 440, { steps: 8 });
+  // a small look to the side: under the pointer lock the mouse sends travel, not a position
+  await page.mouse.move(mx + 70, my - 6, { steps: 8 });
   await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(shots, 'p_play.jpg'), type: 'jpeg', quality: 90 });
   // the picture is not black: the canvas has light in it

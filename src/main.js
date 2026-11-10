@@ -55,13 +55,38 @@ async function boot() {
   }
 
   let last = performance.now();
+  let lost = false;
   function loop(now) {
+    if (lost) return;
     const dt = (now - last) / 1000;
     last = now;
     if (!game.manual) game.frame(dt);
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
+
+  // The graphics card can take the picture away (a driver reset, a laptop waking up). Nothing can
+  // be drawn after that: keep what can be kept, stop, and say how to go on.
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    if (lost) return;
+    lost = true;
+    try {
+      game.save(true);
+    } catch (err) {
+      /* the last save stands */
+    }
+    try {
+      game.audio.dispose();
+    } catch (err) {
+      /* already silent */
+    }
+    if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
+    const a = document.createElement('a');
+    a.textContent = 'Load the page again';
+    a.href = location.href;
+    fail('The graphics card let go of the picture. Load the page again to go on from your last save.', a);
+  });
 
   if (manual || P.has('dev')) hooks(game);
   window.DONE = true;

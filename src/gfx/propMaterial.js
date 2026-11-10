@@ -53,11 +53,19 @@ float tpBump = 0.0;
 float tpBumpAmt = 0.0;
 vec3 tpQ = vUvw;
 float tpLod = clamp(1.0 - length(fwidth(tpQ)) * 5.0, 0.0, 1.0);
+// how squarely this face cuts across the part's Y: the face normal in detail space, from the
+// two screen derivatives of the detail coordinates (taken here, outside the branches)
+vec3 tpNq = cross(dFdx(tpQ) * 1000.0, dFdy(tpQ) * 1000.0);
+float tpAcross = smoothstep(0.55, 0.85, abs(tpNq.y) / max(length(tpNq), 1e-9));
 if (tpMat == 1.0) {
-  // wood: long grain along the part's Y, soft growth rings
+  // wood: long grain along the part's Y, soft growth rings. On a face that cuts across the grain
+  // (a barrel head, the top of a post) the rings are circles round the part's axis: drawn there
+  // as on the flanks they are the contour lines of a noise field, and read as a maze.
   vec3 q = tpQ * vec3(11.0, 1.6, 11.0);
   float g = tpNoise(q) * 0.6 + tpNoise(q * vec3(3.1, 1.2, 3.1) + 7.1) * 0.4;
-  float rings = sin((g * 5.0 + tpQ.y * 0.7) * 6.2831) * 0.5 + 0.5;
+  float flank = sin((g * 5.0 + tpQ.y * 0.7) * 6.2831) * 0.5 + 0.5;
+  float cut = sin((length(tpQ.xz) * 15.0 + g * 0.45) * 6.2831) * 0.5 + 0.5;
+  float rings = mix(flank, cut, tpAcross);
   float d = mix(1.0, mix(0.80, 1.12, g) * mix(0.93, 1.04, rings), tpLod);
   diffuseColor.rgb *= d;
   tpBump = g * 0.7 + rings * 0.2;
