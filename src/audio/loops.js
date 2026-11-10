@@ -139,8 +139,9 @@ export const LOOPS = {
       };
     },
   },
+  // A brook: heard from its banks and a little way off, not from across the vale.
   river: {
-    wet: 0.1, ref: 6, range: 70, k: 1,
+    wet: 0.1, ref: 5, range: 34, k: 1,
     make(S, out, t) {
       const R = rig(S);
       const m = S.gain(1);

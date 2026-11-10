@@ -67,7 +67,9 @@ Grave, weathered, cold. Think of a dying land seen at last light, not a storyboo
 - **Writing.** Spare and grave. Short sentences. No jokes, no exclamation marks.
 - **UI.** Dark, minimal, engraved. Bone-white text on near-black, thin lines, one warm accent.
   Display face Cormorant Garamond, UI face Inter (both embedded). No cards, chips or badges.
-- **Sound.** Dark ambient: drones, low strings, distant bells, wind, a choir that might be the wind.
+- **Sound.** A written score, not a drone: a theme for each place and state, in the old modes,
+  for vielle, flute, lute, horn, voices, bells and war drums, all on one motif. Under it a quiet
+  bed of wind and far-off things. Water is heard near water and nowhere else.
 
 ## 3. Code layout and ownership
 

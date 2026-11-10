@@ -6,6 +6,8 @@ import { SFX, clink, blip, creak, flutter } from './sfx.js';
 
 const REGIONS = ['shore', 'vale', 'saltwood', 'mere', 'scar', 'heights'];
 const ZERO = { region: null, night: 0, wind: 0.3, rain: 0, gloom: 0, water: 0, height: 0 };
+// Level of the wind voices in a gale (wind = 1); it falls with the square of the wind.
+const WIND = 2.2;
 
 export function createAmbience(S, bus, wet, t0 = S.now) {
   const target = { ...ZERO };
@@ -29,17 +31,24 @@ export function createAmbience(S, bus, wet, t0 = S.now) {
   };
 
   // --- wind ----------------------------------------------------------------------------------
+  // Wind has no sound of its own: it is heard where it meets something. So there is no steady
+  // hiss in this bed. Broad noise that slowly rises and falls is the sound of surf, and that is
+  // what it was taken for, all over the island. Instead: three hollow voices that climb as they
+  // swell and are gone between their gusts, so that a light wind leaves long stretches with
+  // nothing in them but the place and the score.
   const wind = layer('wind');
-  for (const side of [-1, 1]) {
-    const bp = S.bq('bandpass', 380, 0.6),
-      g = S.gain(0.55);
+  for (const [hz, q, side, rate] of [[230, 2.4, -0.6, 0.8], [390, 3, 0.55, 1.05], [610, 3.6, -0.1, 1.3]]) {
+    const bp = S.bq('bandpass', hz, q),
+      g = S.gain(0);
     // a gust is louder and higher at once
-    S.sway([[bp.frequency, 380, 180], [g.gain, 0.55, 0.4]], S.range(0.9, 1.3), null, t0);
-    S.chain(S.noise('pink', t0), bp, g, S.pan(side * 0.6), wind);
+    S.sway([[bp.frequency, hz * 0.8, hz * 0.55, 'pos'], [g.gain, 0, 1, 'crest']], rate, null, t0);
+    S.chain(S.noise('pink', t0), bp, S.bq('lowpass', 1300), g, S.pan(side), wind);
   }
-  const air = S.gain(0.15);
-  S.sway([air.gain, 0.15, 0.13], 1.6, null, t0);
-  S.chain(S.noise('white', t0), S.bq('highpass', 2500), S.bq('lowpass', 7000), air, wind);
+  // the top of a strong gust, on open ground only
+  const air = layer('air');
+  const airG = S.gain(0);
+  S.sway([airG.gain, 0, 1, 'crest'], 0.9, null, t0);
+  S.chain(S.noise('white', t0), S.bq('bandpass', 2600, 0.7), airG, air);
   const rumble = layer('rumble');
   S.chain(S.noise('brown', t0), S.bq('lowpass', 110), rumble);
   // the whistle only speaks in the gusts
@@ -50,14 +59,10 @@ export function createAmbience(S, bus, wet, t0 = S.now) {
     S.sway([[bp.frequency, hz, hz * 0.3], [g.gain, 0, 1, 'crest']], S.range(1.2, 1.8), null, t0);
     S.chain(S.noise('white', t0), bp, g, S.pan(side), whistle);
   }
-  // dry grass on the moor
-  const grass = layer('grass');
-  const gg = S.gain(0.5);
-  S.sway([gg.gain, 0.5, 0.5], 2.2, null, t0);
-  S.chain(S.noise('white', t0), S.bq('highpass', 2200), S.bq('lowpass', 6000), gg, grass);
-  // the Saltwood: wind finding the hollows of dead trunks, each with a voice of its own
+  // the Saltwood: wind finding the hollows of dead trunks, each with a voice of its own. They are
+  // tuned to the fifths its music is written in (B2 E3 B3 E4), and never quite hold the pitch.
   const hollow = layer('hollow');
-  [183, 211, 274, 331].forEach((hz, i) => {
+  [123.5, 164.8, 246.9, 329.6].forEach((hz, i) => {
     const a = S.bq('bandpass', hz, 30),
       b = S.bq('bandpass', hz, 22),
       g = S.gain(0);
@@ -65,9 +70,9 @@ export function createAmbience(S, bus, wet, t0 = S.now) {
     S.sway([g.gain, 0, 1], S.range(0.8, 1.6), 'crest', t0);
     S.chain(S.noise('pink', t0), a, b, g, S.pan([-0.7, 0.3, -0.2, 0.7][i]), hollow);
   });
-  // mist lying on the Mere
+  // the Mere: the weight of still, cold air (far down; nothing that could be taken for water)
   const mist = layer('mist');
-  S.chain(S.noise('pink', t0), S.bq('lowpass', 520), mist);
+  S.chain(S.noise('brown', t0), S.bq('lowpass', 160), mist);
 
   // --- rain ----------------------------------------------------------------------------------
   const rain = layer('rain');
@@ -229,7 +234,9 @@ export function createAmbience(S, bus, wet, t0 = S.now) {
       fire(t, lv) {
         const d = S.range(4, 7),
           p = pan();
-        S.nz(inp, t, { k: 'pink', d, a: d * 0.45, f: 300, f1: 700, tf: d * 0.45, q: 0.7, g: 0.4 * lv, pan: p, c: 't' });
+        S.nz(inp, t, { k: 'pink', d, a: d * 0.45, f: 260, f1: 620, tf: d * 0.45, q: 2.2, g: 0.5 * lv, pan: p, c: 't' });
+        // dry grass on the moor answers it, and is still again
+        if (w.vale > 0.3) S.nz(inp, t + d * 0.2, { k: 'white', d: d * 0.6, a: d * 0.3, f: 3400, q: 0.7, g: 0.035 * lv * w.vale, pan: -p, c: 't' });
         const high = clamp(c.height + w.heights, 0, 1);
         if (high > 0.1) {
           const f = S.range(900, 1300);
@@ -250,14 +257,14 @@ export function createAmbience(S, bus, wet, t0 = S.now) {
       quiet = 1 - 0.35 * c.gloom;
     // (the narrow voices, whistle and hollow, need large numbers: a band a few hertz wide keeps very
     // little of the noise that goes into it)
-    set(wind.gain, (0.1 + 0.9 * Math.pow(wd, 1.2)) * quiet);
+    set(wind.gain, WIND * wd * wd * quiet);
+    set(air.gain, 0.6 * Math.pow(clamp(wd - 0.45, 0, 1), 1.5) * quiet);
     set(rumble.gain, 0.2 * wd * wd * quiet);
     set(whistle.gain, 2.8 * clamp(wd - 0.3, 0, 1) * clamp(0.35 + c.height + w.heights, 0, 1.4));
-    set(grass.gain, 0.5 * wd * w.vale * quiet);
-    set(hollow.gain, 3 * w.saltwood * (0.3 + 0.7 * wd));
-    set(mist.gain, 0.1 * w.mere);
+    set(hollow.gain, 2 * w.saltwood * (0.3 + 0.7 * wd));
+    set(mist.gain, 0.06 * w.mere);
     set(rain.gain, 0.7 * Math.pow(c.rain, 0.8));
-    set(scar.gain, 0.5 * w.scar);
+    set(scar.gain, 0.4 * w.scar);
     set(gloom.gain, 0.28 * Math.pow(c.gloom, 1.2));
     set(muffle.frequency, 18000 * Math.pow(2600 / 18000, Math.pow(c.gloom, 1.5)));
   }

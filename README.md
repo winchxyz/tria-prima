@@ -80,7 +80,11 @@ the only assets are two fonts.
   controller written for the game (walking, running, jumping, swimming, climbing, standing on
   what the potions make).
 - **Sound.** Synthesised with the Web Audio API: weather and places, fire, water, footsteps by
-  surface, the cauldron, the Shades, and a score that follows the place.
+  surface, the cauldron, the Shades.
+- **Score.** Eleven written pieces, one for each place and state, on one motif: a vielle, a
+  flute, a lute, a horn, voices, bells and drums, all synthesised. The notes are in
+  `src/audio/score.js` as plain text (keys, chords, a line for each player); the band in
+  `src/audio/music.js` reads them and lets players in and out with what is happening.
 - **Interface.** DOM and CSS over the canvas: HUD, the brewing chart, the book with its map, menus.
 
 ## Run it locally
@@ -112,10 +116,10 @@ the root of this repository is what GitHub Pages serves.
 | `src/world/` | the island: heightmap, terrain, placement of everything on it |
 | `src/models/` | the procedural model kit and every model |
 | `src/game/` | player, potions, brewing, quests, entities, Shades, saving |
-| `src/audio/` | the synthesiser, the ambience and the score |
+| `src/audio/` | the synthesiser, the ambience, the instruments and the written score |
 | `src/ui/` | HUD, cauldron, book, menus |
 | `dev/` | development pages: model viewer, world viewer, interface and audio benches |
-| `tools/` | dev server, release build, and scripted play on a real GPU (`tools/play.mjs`) |
+| `tools/` | dev server, release build, scripted play on a real GPU (`tools/play.mjs`), and checks of the sound, the score and the mouse look that need no ears or hands |
 | `docs/` | the design and the module contracts |
 
 The scripted play tools need a copy of `playwright-core` and a Chromium; see `tools/pw.mjs`.

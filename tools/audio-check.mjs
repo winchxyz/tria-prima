@@ -6,6 +6,8 @@
 //   node tools/audio-check.mjs --only sfx,loops    some of: live master place sfx loops music amb mix shots
 //   node tools/audio-check.mjs --calibrate         measure, then rewrite src/audio/levels.js
 //   node tools/audio-check.mjs --long vale [--secs 600] [--intensity 0.6]
+//   node tools/audio-check.mjs --players vale [--of flute,drum] [--secs 90] [--intensity 1]
+//                                                  the players of a mood, each alone: the balance
 //   node tools/audio-check.mjs --soak [180]        a long real-time session, looking for leaks
 //   node tools/audio-check.mjs --shot sfx:bell,mood:vale:150 spectrograms of your choice (:seconds)
 //   node tools/audio-check.mjs --wav mood:title,sfx:bell     the same renders as WAV files in shots/
@@ -23,7 +25,7 @@ const opt = (name) => {
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null;
 };
 const calibrate = flag('calibrate');
-const extra = opt('long') || opt('shot') || opt('wav') || flag('soak');
+const extra = opt('long') || opt('shot') || opt('wav') || opt('players') || flag('soak');
 const only = opt('only') ? new Set(opt('only').split(',')) : calibrate ? new Set(['sfx', 'loops', 'music']) : extra ? new Set() : null;
 const want = (s) => !only || only.has(s);
 
@@ -215,11 +217,12 @@ try {
 
   // --- music ------------------------------------------------------------------------------------
   if (want('music')) {
-    head('music (30 s of each mood at intensity 0.7, with reverb, before the limiter)');
+    const moodSecs = await page.evaluate(() => window.AUD.MOOD_SECS);
+    head(`music (${moodSecs} s of each mood at intensity 0.7, with reverb, before the limiter)`);
     console.log(`${pad('mood', 10)}${'want'.padStart(6)}${'loud 3s'.padStart(9)}${'rms'.padStart(7)}${'peak'.padStart(7)}${'centr'.padStart(7)}${'dc'.padStart(8)}${'sources'.padStart(9)}${'render'.padStart(9)}  flags`);
     report.music = [];
     for (const mood of names.moods) {
-      const s = await call('moodStats', mood, 30, 0.7);
+      const s = await call('moodStats', mood, moodSecs, 0.7);
       report.music.push({ ...s, shape: undefined });
       const f = [];
       if (s.nan) f.push(bad(mood, `NaN x${s.nan}`));
@@ -325,6 +328,14 @@ try {
     if (s.seen.voices > 28) bad('soak', `voice limit broken: ${s.seen.voices}`);
     if (s.seen.peak >= 1) bad('soak', `output reached full scale: ${s.seen.peak}`);
   }
+  if (opt('players')) {
+    const mood = opt('players'),
+      intensity = Number(opt('intensity') || 1);
+    head(`${mood}: every player alone at intensity ${intensity}`);
+    console.log(`${pad('player', 10)}${'from'.padStart(6)}${'loud 3s'.padStart(9)}${'rms'.padStart(7)}${'peak'.padStart(7)}${'>150Hz'.padStart(8)}${'centr'.padStart(7)}${'sources'.padStart(9)}`);
+    const of = opt('of') ? opt('of').split(',') : null;
+    for (const s of (report.players = await call('players', mood, Number(opt('secs') || 90), intensity, of))) console.log(`${pad(s.name, 10)}${num(s.from, 6, 2)}${num(s.loud3Db, 9)}${num(s.rmsDb, 7)}${num(s.peakDb, 7)}${num(s.above150Db, 8)}${num(s.centroid, 7, 0)}${num(s.sources, 9, 0)}`);
+  }
   if (opt('long')) {
     const secs = Number(opt('secs') || 600);
     head(`${opt('long')}: ${secs} s, level every 5 s`);
@@ -333,11 +344,13 @@ try {
       lo = hi - 36;
     for (let i = 0; i < s.trace.length; i += 60) console.log(`${String(i * 5).padStart(5)} s |${spark(s.trace.slice(i, i + 60), lo, hi)}|`);
     console.log(`rendered in ${s.ms} ms, ${s.sources} sources; peak ${s.peakDb} dBFS, rms ${s.rmsDb}, median ${s.medianDb}`);
-    console.log(`${(s.quietShare * 100).toFixed(0)} % of the time is more than 12 dB below the loudest moment; first half ${s.firstHalfDb} dB, second half ${s.secondHalfDb} dB`);
+    console.log(`the loudest tenth of the time stands ${s.spanDb} dB above the quietest tenth; ${(s.quietShare * 100).toFixed(0)} % is more than 12 dB below the loudest moment; first half ${s.firstHalfDb} dB, second half ${s.secondHalfDb} dB`);
     if (s.nan) bad('long', 'NaN');
     if (Math.abs(s.firstHalfDb - s.secondHalfDb) > 4) bad('long', 'the level drifts over time');
-    // the Gloom and the Great Work are meant to press on; everywhere else the score must let go
-    if (s.quietShare < 0.15 && !['gloom', 'opus'].includes(s.name)) bad('long', 'no real rests');
+    // A written piece does not fall silent between phrases: it thins to a few players and fills
+    // again. So the question is whether it has light and shade, not whether it stops. The Gloom is
+    // meant to press on.
+    if (s.spanDb < 3 && s.name !== 'gloom') bad('long', 'no light and shade: the level hardly moves');
   }
 
   // --- calibration ------------------------------------------------------------------------------

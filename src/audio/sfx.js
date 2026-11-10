@@ -7,7 +7,7 @@
 //       prio  0 expendable .. 2 never stolen     gap   least seconds between two triggers
 //       k     level trim, set from the measurements of tools/audio-check.mjs
 import { mtof } from './dsp.js';
-import { chime, bigBell, chord, choirNote } from './instruments.js';
+import { chime, bigBell, chord, choirNote, anvil } from './instruments.js';
 import { SFX_K } from './levels.js';
 
 export const SFX = {};
@@ -343,7 +343,8 @@ def('cork', { wet: 0.08 }, (S, out, t, o) => {
 });
 def('brew_ready', { wet: 0.6, prio: 2 }, (S, out, t) => {
   [62, 69, 74].forEach((m, i) => chime(S, out, t + i * 0.07, m, i ? 0.5 : 0.7, { dk: 4 }));
-  bigBell(S, out, t, 73.42, 0.5, 4);
+  // a small bell: the deep one is kept for the Primes and the Great Work
+  bigBell(S, out, t, 146.83, 0.5, 3.5);
   S.nz(out, t, { k: 'white', d: 1.6, a: 0.5, f: 5000, q: 1.5, g: 0.04 });
   chord(S, out, t + 0.05, [50, 57, 62], 1.0, 0.25, { a: 0.6, r: 2.2 });
   return 5.5;
@@ -533,6 +534,11 @@ def('opus_stage', { wet: 0.7, prio: 2 }, (S, out, t, o) => {
   bigBell(S, out, t, 73.42 * Math.pow(2, s / 12), 0.8, 6);
   chord(S, out, t + 0.05, [50 + s, 57 + s], 1.4, 0.4, { a: 0.7, r: 2.4 });
   S.nz(out, t, { k: 'white', d: 1.4, a: 0.4, f: 6000, q: 1.5, g: 0.04 });
+  // a hammer on the anvil, then the fire takes a breath and climbs: what sets a stage of the Work
+  // apart from a potion binding
+  anvil(S, out, t, 0.7);
+  anvil(S, out, t + 0.34, 0.4);
+  S.nz(out, t + 0.1, { k: 'pink', d: 2.6, a: 1.1, f: 300, f1: 1500, q: 0.9, g: 0.3 });
   return 7.0;
 });
 def('stone_form', { wet: 0.8, prio: 2 }, (S, out, t) => {

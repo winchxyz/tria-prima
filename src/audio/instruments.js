@@ -126,11 +126,25 @@ export function pluck(S, out, t, m, vel = 1, o = {}) {
   return t + buf.duration / rate;
 }
 
+/**
+ * The skin of a drum: its own soft clip. The first instant of the blow is rounded and what rings
+ * after it is lifted, so a drum can be heard without standing 20 dB over the band for a moment.
+ * `drive` is set so that the hardest blow just reaches the top of the curve. Returns where to play.
+ */
+function skin(S, out, drive = 1) {
+  const pre = S.gain(drive);
+  S.chain(pre, S.shaper('soft'), S.gain(0.6 / drive), out);
+  return pre;
+}
+
 /** A very large, very slack drum, far away. */
 export function drum(S, out, t, vel = 1) {
-  S.tn(out, t, { f: 72, f1: 39, tf: 0.3, d: 1.5, a: 0.004, g: 0.75 * vel });
-  S.tn(out, t, { f: 104, f1: 60, tf: 0.12, d: 0.4, a: 0.003, g: 0.35 * vel });
-  S.nz(out, t, { k: 'brown', d: 0.32, a: 0.003, f: 190, ft: 'lowpass', g: 0.7 * vel });
+  const to = skin(S, out, 1.3);
+  S.tn(to, t, { f: 72, f1: 39, tf: 0.3, d: 1.5, a: 0.004, g: 0.6 * vel });
+  S.tn(to, t, { f: 104, f1: 60, tf: 0.12, d: 0.4, a: 0.003, g: 0.35 * vel });
+  // the knock of the skin, an octave up: what is left of the drum on small speakers
+  S.tn(to, t, { f: 176, f1: 112, tf: 0.09, d: 0.24, a: 0.004, g: 0.3 * vel });
+  S.nz(to, t, { k: 'brown', d: 0.32, a: 0.003, f: 240, ft: 'lowpass', g: 0.7 * vel });
   S.nz(out, t, { k: 'pink', d: 0.03, a: 0.001, f: 900, q: 0.8, g: 0.09 * vel });
   return t + 1.6;
 }
@@ -177,4 +191,203 @@ export function chord(S, out, t, midis, dur, vel = 1, o = {}) {
     if (o.voices !== false && m >= 48) end = Math.max(end, choirNote(S, out, t, m, dur, vel * 0.5, { a: o.a ?? 0.8, r: o.r ?? 2.2, v0: o.v0 || 'oo', v1: o.v1 || 'ah' }));
   }
   return end;
+}
+
+// --- the players of the written score (score.js) -------------------------------------------------
+
+/**
+ * One bow on one string: a vielle carrying a tune. A step from the note before is slid into, any
+ * other note is found from just below, and the vibrato only comes once the note is held.
+ * o: a r vib bright from (the note before, when this one is joined to it)
+ */
+export function viol(S, out, t, m, dur, vel = 1, o = {}) {
+  const f = mtof(m);
+  const a = o.a ?? 0.08,
+    r = o.r ?? 0.26,
+    bright = o.bright ?? 0.5;
+  dur = Math.max(dur, a + 0.05);
+  const body = dur - a;
+  const g = S.gain(0);
+  // the bow bites, leans into the note, eases, and lets go
+  const end = S.env(g.gain, t, 0, [[a, vel * 0.78], [body * 0.42, vel], [body * 0.58, vel * 0.64], [r, 0, 't'], [0.04, 0]]);
+  const life = end - t + 0.03;
+  const step = o.from != null ? o.from - m : 0;
+  const slid = step !== 0 && Math.abs(step) <= 4;
+  const bend = slid ? step * 38 : -26,
+    glide = slid ? 0.085 : 0.06;
+  const vib = S.osc('sine', S.range(5.1, 5.9), t, life);
+  const vg = S.gain(0);
+  const late = Math.min(0.22, dur * 0.35);
+  vg.gain.setValueAtTime(0, t + late);
+  vg.gain.linearRampToValueAtTime(o.vib ?? 15, t + late + 0.35);
+  vib.connect(vg);
+  const sum = S.gain(0.34);
+  for (const det of [-3, 6]) {
+    const osc = S.osc('sawtooth', f, t, life, det);
+    S.slow(osc.detune);
+    osc.detune.setValueAtTime(det + bend, t);
+    osc.detune.linearRampToValueAtTime(det, t + glide);
+    vg.connect(osc.detune);
+    osc.connect(sum);
+  }
+  // rosin
+  S.chain(S.noise('pink', t, life), S.bq('bandpass', Math.min(f * 3, 3600), 1.2), S.gain(0.05), sum);
+  const cut0 = Math.min(f * 2 + 300, 3000),
+    cut1 = Math.min(f * (3 + 5 * bright) + 600, 6500);
+  const lp = S.bq('lowpass', cut0);
+  lp.frequency.setValueAtTime(cut0, t);
+  lp.frequency.linearRampToValueAtTime(cut1, t + a + body * 0.42);
+  lp.frequency.setTargetAtTime(cut0, t + dur, r / 3);
+  // the box: the three resonances that make a fiddle a fiddle
+  S.chain(sum, lp, S.bq('peaking', 290, 1.6, 4), S.bq('peaking', 1150, 2, 6), S.bq('peaking', 2500, 2.2, 3), S.bq('highpass', 90), g, out);
+  return end;
+}
+
+/** A wooden flute: nearly a pure tone with breath around it, a little sharp as it speaks. o: a r vib breath */
+export function flute(S, out, t, m, dur, vel = 1, o = {}) {
+  const f = mtof(m);
+  const a = o.a ?? 0.07,
+    r = o.r ?? 0.17,
+    breath = o.breath ?? 1;
+  dur = Math.max(dur, a + 0.04);
+  const body = dur - a;
+  const g = S.gain(0);
+  const end = S.env(g.gain, t, 0, [[a, vel], [body * 0.5, vel * 0.86], [body * 0.5, vel * 0.72], [r, 0, 't'], [0.04, 0]]);
+  const life = end - t + 0.03;
+  const vib = S.osc('sine', S.range(4.6, 5.4), t, life);
+  const vg = S.gain(0);
+  const late = Math.min(0.2, dur * 0.4);
+  vg.gain.setValueAtTime(0, t + late);
+  vg.gain.linearRampToValueAtTime(o.vib ?? 11, t + late + 0.3);
+  vib.connect(vg);
+  const sum = S.gain(0.5);
+  for (const [mul, lvl] of [[1, 1], [2, 0.3], [3, 0.1], [4, 0.035]]) {
+    if (f * mul > 9000) continue;
+    const osc = S.osc('sine', f * mul, t, life);
+    S.slow(osc.detune);
+    osc.detune.setValueAtTime(17, t);
+    osc.detune.linearRampToValueAtTime(0, t + 0.06);
+    vg.connect(osc.detune);
+    if (lvl === 1) osc.connect(sum);
+    else S.chain(osc, S.gain(lvl), sum);
+  }
+  // breath: a puff as the note speaks, then air along with the tone
+  const bg = S.gain(0);
+  S.env(bg.gain, t, 0, [[0.015, 0.5 * breath], [0.07, 0.11 * breath], [Math.max(0.01, dur - 0.085), 0.08 * breath], [r, 0]]);
+  S.chain(S.noise('white', t, life), S.bq('bandpass', Math.min(f * 2.2, 6000), 1.4), bg, sum);
+  S.chain(sum, S.bq('lowpass', Math.min(f * 5, 7000)), g, out);
+  return end;
+}
+
+/** A small organ: stopped pipes at five pitches, a cough of air as they speak, no vibrato. o: a r full */
+export function organ(S, out, t, m, dur, vel = 1, o = {}) {
+  const f = mtof(m);
+  const a = o.a ?? 0.05,
+    r = o.r ?? 0.24;
+  dur = Math.max(dur, a + 0.03);
+  const g = S.gain(0);
+  const end = S.env(g.gain, t, 0, [[a, vel], [dur - a, vel], [r, 0, 't'], [0.04, 0]]);
+  const life = end - t + 0.03;
+  const sum = S.gain(0.3);
+  // the sixteen-foot, eight-foot, four-foot, the twelfth and the two-foot ranks
+  const ranks = [[0.5, 0.5], [1, 1], [2, 0.5], [3, 0.2], [4, 0.26]];
+  if (o.full) ranks.push([6, 0.1], [8, 0.08]);
+  for (const [mul, lvl] of ranks) if (f * mul < 9000) S.chain(S.osc('sine', f * mul, t, life, S.range(-3, 3)), S.gain(lvl), sum);
+  S.chain(S.osc('triangle', f, t, life, 4), S.gain(0.35), sum);
+  S.nz(sum, t, { k: 'white', d: 0.07, a: 0.004, f: Math.min(f * 3, 5000), q: 2, g: 0.25 });
+  S.chain(sum, S.bq('lowpass', 4200), g, out);
+  return end;
+}
+
+/** A war horn: the harder it is blown, the more it opens. o: a r */
+export function horn(S, out, t, m, dur, vel = 1, o = {}) {
+  const f = mtof(m);
+  const a = o.a ?? clamp(0.16 - 0.06 * vel, 0.07, 0.16),
+    r = o.r ?? 0.45;
+  dur = Math.max(dur, a + 0.05);
+  const body = dur - a;
+  const g = S.gain(0);
+  const end = S.env(g.gain, t, 0, [[a, vel], [body * 0.4, vel * 0.9], [body * 0.6, vel * 0.75], [r, 0, 't'], [0.05, 0]]);
+  const life = end - t + 0.03;
+  const sum = S.gain(0.4);
+  for (const det of [-5, 4]) {
+    const osc = S.osc('sawtooth', f, t, life, det);
+    S.slow(osc.detune);
+    // the lip finds the note from below
+    osc.detune.setValueAtTime(det - 30, t);
+    osc.detune.linearRampToValueAtTime(det, t + 0.07);
+    osc.connect(sum);
+  }
+  const shut = f * 1.4,
+    top = clamp(f * (3 + 3.5 * vel), 300, 2600),
+    open = Math.min(a * 1.5, dur);
+  const lp = S.bq('lowpass', shut, 2);
+  lp.frequency.setValueAtTime(shut, t);
+  lp.frequency.linearRampToValueAtTime(top, t + open);
+  lp.frequency.setTargetAtTime(top * 0.7, t + open, 0.6);
+  lp.frequency.setTargetAtTime(shut, t + dur, r / 3);
+  S.chain(sum, lp, S.bq('peaking', 480, 1.2, 4), g, out);
+  return end;
+}
+
+/** Low strings, bowed. With `bite` the bow is short and hard and the string rasps. o: a r bite */
+export function bass(S, out, t, m, dur, vel = 1, o = {}) {
+  const f = mtof(m);
+  const a = o.a ?? 0.1,
+    r = o.r ?? 0.35;
+  dur = Math.max(dur, a + 0.04);
+  const g = S.gain(0);
+  const end = S.env(g.gain, t, 0, [[a, vel], [dur - a, vel * 0.8], [r, 0, 't'], [0.05, 0]]);
+  const life = end - t + 0.03;
+  const sum = S.gain(0.5);
+  S.osc('sawtooth', f, t, life, -3).connect(sum);
+  S.chain(S.osc('sine', f, t, life), S.gain(0.5), sum);
+  S.chain(S.osc('triangle', f * 2, t, life, 4), S.gain(0.45), sum);
+  // what a small speaker can play of a low string is its overtones: they are kept
+  const cut = o.bite ? clamp(f * 9, 500, 1500) : clamp(f * 6, 260, 800);
+  const lp = S.bq('lowpass', cut * 0.6);
+  lp.frequency.setValueAtTime(cut * 0.6, t);
+  lp.frequency.linearRampToValueAtTime(cut, t + a);
+  if (o.bite) lp.frequency.setTargetAtTime(cut * 0.5, t + a, Math.max(0.05, dur / 2));
+  S.chain(sum, lp, g, out);
+  return end;
+}
+
+/** A frame drum: the open stroke in the middle of the skin (deep), or the rim. */
+export function frame(S, out, t, vel = 1, deep = true) {
+  if (deep) {
+    const to = skin(S, out, 0.7);
+    S.tn(to, t, { f: 118, f1: 76, tf: 0.12, d: 0.5, a: 0.002, g: 0.7 * vel });
+    S.tn(to, t, { f: 236, f1: 170, tf: 0.05, d: 0.16, a: 0.002, g: 0.2 * vel });
+    S.nz(out, t, { k: 'pink', d: 0.07, a: 0.001, f: 700, q: 0.7, g: 0.22 * vel });
+    return t + 0.55;
+  }
+  S.nz(out, t, { k: 'white', d: 0.06, a: 0.001, f: 1900, q: 1.1, g: 0.3 * vel });
+  S.tn(out, t, { w: 'triangle', f: 340, f1: 300, d: 0.09, a: 0.001, g: 0.2 * vel });
+  return t + 0.12;
+}
+
+/** A war drum: a tight skin on a big shell, close by. */
+export function warDrum(S, out, t, vel = 1) {
+  const to = skin(S, out, 0.85);
+  S.tn(to, t, { f: 96, f1: 48, tf: 0.2, d: 1.1, a: 0.003, g: 0.62 * vel });
+  S.tn(to, t, { f: 150, f1: 82, tf: 0.08, d: 0.3, a: 0.002, g: 0.45 * vel });
+  // the shell, an octave over the skin: the part of the blow that small speakers can play
+  S.tn(to, t, { f: 240, f1: 132, tf: 0.07, d: 0.22, a: 0.002, g: 0.36 * vel });
+  S.nz(to, t, { k: 'brown', d: 0.22, a: 0.002, f: 320, ft: 'lowpass', g: 0.8 * vel });
+  S.nz(out, t, { k: 'pink', d: 0.05, a: 0.001, f: 1300, q: 0.8, g: 0.3 * vel });
+  return t + 1.2;
+}
+
+/** A rattle of bone and seed. */
+export function rattle(S, out, t, vel = 1) {
+  S.tx(out, t, 'grit', { d: 0.09, a: 0.004, g: 0.3 * vel, hp: 2500 });
+  return t + 0.12;
+}
+
+// Partials [hz, gain, seconds] of a hammer on an anvil: bright, unrelated, soon gone.
+const ANVIL = [[523, 0.3, 0.9], [1187, 0.34, 0.7], [1870, 0.26, 0.55], [2740, 0.2, 0.42], [3610, 0.13, 0.3], [5200, 0.07, 0.22]];
+export function anvil(S, out, t, vel = 1) {
+  S.nz(out, t, { k: 'white', d: 0.025, a: 0.0006, f: 3800, q: 0.8, g: 0.3 * vel });
+  return t + S.modal(out, t, { parts: ANVIL.map(([hz, g, secs]) => [hz, g * vel, secs]), a: 0.0008, det: 6 });
 }

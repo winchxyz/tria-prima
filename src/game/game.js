@@ -49,6 +49,10 @@ const WEATHER = {
   scar: { overcast: 0.6, fog: 0.35, wind: 0.4, tint: [1.1, 0.95, 0.85], dim: 1, gloom: { overcast: 0.95, fog: 0.65, tint: [1.25, 0.8, 0.6], dim: 0.8 } },
 };
 const MOOD = { shore: 'vale', vale: 'vale', saltwood: 'saltwood', mere: 'mere', scar: 'scar', heights: 'heights' };
+// The pieces that belong to a place or an hour. Between two of them the score waits until the new
+// one has held for a while: a walk along a border must not start a tune over at every step.
+const PLACE_MOODS = new Set(['vale', 'saltwood', 'mere', 'scar', 'heights', 'night']);
+const MOOD_DWELL = 6; // seconds
 
 const store = {
   get(k) {
@@ -152,6 +156,9 @@ export class Game {
     this._titleT = 0;
     this._dead = 0;
     this._musicT = 0;
+    this._mood = 'none'; // the piece the score was last asked for
+    this._moodHeld = 0; // seconds another place's piece has been wanted instead
+    this._inGloom = false;
     this._loops = { lava: null, river: null, levity: null };
     this._photo = null;
     this._cleared = 0;
@@ -1101,20 +1108,29 @@ export class Game {
     if (this._musicT <= 0) {
       this._musicT = 0.5;
       let mood = 'none',
-        intensity = 0.5;
-      if (mode === 'title') mood = 'title';
-      else if (this._cut && this._cut.kind === 'ending') {
+        intensity = 0.6;
+      // the Gloom is entered a little deeper than it is left, so its edge does not flicker
+      this._inGloom = this._gloomHere > (this._inGloom ? 0.3 : 0.45);
+      if (mode === 'title') {
+        mood = 'title';
+        intensity = 0.7;
+      } else if (this._cut && this._cut.kind === 'ending') {
         mood = 'ending';
         intensity = 1;
       } else if (mode === 'dead') mood = 'none';
       else if (mode === 'brew' || this.brewing.k > 0.5) {
         mood = this.brew.opus ? 'opus' : 'brew';
         intensity = this.brew.opus ? 0.4 + 0.15 * this.brew.opus.stage + 0.2 * this.brew.progress : 0.4 + 0.5 * this.brew.progress;
-      } else if (this._gloomHere > 0.4) {
+      } else if (this._inGloom) {
         mood = 'gloom';
         intensity = 0.35 + 0.65 * this.shades.closeness;
       } else if ((e.sky.night || 0) > 0.6) mood = 'night';
       else mood = MOOD[this.region] || 'vale';
+      if (mood !== this._mood && PLACE_MOODS.has(mood) && PLACE_MOODS.has(this._mood) && (this._moodHeld += 0.5) < MOOD_DWELL) mood = this._mood;
+      else {
+        this._mood = mood;
+        this._moodHeld = 0;
+      }
       A.setMusic(mood, { intensity: clamp(intensity, 0, 1) });
 
       // the long voices of the land
@@ -1131,12 +1147,12 @@ export class Game {
         L.lava = null;
       }
       const dr = RIVER.dist(p.x, p.z, _ro);
-      if (dr < 45) {
+      if (dr < 32) {
         RIVER.at(_ro.s, _ro);
         const pos = [_ro.x, this.world.T.heightAt(_ro.x, _ro.z) + 0.3, _ro.z];
         if (!L.river) L.river = A.loop('river', { pos, gain: 0.8 });
         else L.river.set({ pos });
-      } else if (L.river && dr > 60) {
+      } else if (L.river && dr > 38) {
         L.river.stop(1.5);
         L.river = null;
       }

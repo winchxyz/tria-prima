@@ -1,4 +1,6 @@
 // Keyboard and mouse. Pointer lock when the browser grants it; otherwise drag to look.
+import { LookFilter } from './look.js';
+
 export class Input {
   constructor(canvas) {
     this.canvas = canvas;
@@ -20,7 +22,9 @@ export class Input {
     this.onUnlock = null; // () => void, when the browser drops the lock
     this._dragMoved = 0;
     this._dragT = 0;
-    this._lockT = 0;
+    this.raw = null; // true once the browser hands over the mouse's own movement, false if it cannot
+    this.look = new LookFilter(); // look.js: drops the reports that are the cursor being moved
+    this._lm = [0, 0];
 
     const kd = (e) => {
       if (!this.active) return;
@@ -76,10 +80,12 @@ export class Input {
       this.mdx += e.movementX || 0;
       this.mdy += e.movementY || 0;
       if (this.locked) {
-        // some browsers hand back one huge delta when the lock engages
-        if (performance.now() - this._lockT < 120 && Math.abs(e.movementX) + Math.abs(e.movementY) > 200) return;
-        this.dx += e.movementX || 0;
-        this.dy += e.movementY || 0;
+        // window size in the units of the report, whatever the page zoom
+        const w = Math.min(innerWidth, outerWidth || innerWidth),
+          h = Math.min(innerHeight, outerHeight || innerHeight);
+        const m = this.look.feed(e.movementX || 0, e.movementY || 0, e.timeStamp || performance.now(), w, h, this._lm);
+        this.dx += m[0];
+        this.dy += m[1];
       } else if (this.left || this.right) {
         this.dx += e.movementX || 0;
         this.dy += e.movementY || 0;
@@ -89,7 +95,7 @@ export class Input {
     document.addEventListener('pointerlockchange', () => {
       const was = this.locked;
       this.locked = document.pointerLockElement === canvas;
-      if (this.locked) this._lockT = performance.now();
+      if (this.locked && !was) this.look.reset(performance.now());
       if (was && !this.locked && this.onUnlock) this.onUnlock();
     });
     document.addEventListener('pointerlockerror', () => {
@@ -100,14 +106,37 @@ export class Input {
   requestLock() {
     this.lockWanted = true;
     if (this.locked || !this.canvas.requestPointerLock) return;
+    const plain = () => {
+      try {
+        const p = this.canvas.requestPointerLock();
+        if (p && p.catch)
+          p.catch(() => {
+            this.lockFailed = true;
+          });
+      } catch (e) {
+        this.lockFailed = true;
+      }
+    };
+    if (this.raw === false) return plain();
+    // Ask for the mouse's own movement first. The browser then has no cursor to keep inside the
+    // window, so it never moves one, and never mistakes that for the hand (see look.js).
     try {
-      const p = this.canvas.requestPointerLock();
-      if (p && p.catch)
-        p.catch(() => {
-          this.lockFailed = true;
-        });
+      const p = this.canvas.requestPointerLock({ unadjustedMovement: true });
+      if (p && p.then)
+        p.then(
+          () => {
+            this.raw = true;
+          },
+          (err) => {
+            if (err && err.name === 'NotSupportedError') {
+              this.raw = false;
+              plain();
+            } else this.lockFailed = true;
+          }
+        );
     } catch (e) {
-      this.lockFailed = true;
+      this.raw = false;
+      plain();
     }
   }
   releaseLock() {

@@ -6,6 +6,8 @@ import { createAudio, MASTER } from '../src/audio/index.js';
 import { SFX } from '../src/audio/sfx.js';
 import { LOOPS } from '../src/audio/loops.js';
 import { MOOD_K } from '../src/audio/levels.js';
+import { DEV } from '../src/audio/music.js';
+import { PIECES } from '../src/audio/score.js';
 
 const SR = 48000;
 const NAMES = createAudio().names();
@@ -32,8 +34,10 @@ for (const s of NAMES.surfaces) SFX_DB['step_' + s] = STEP_DB;
 // Loops: steady RMS at full parameter, at the reference distance.
 const LOOP_DB = { fire: -23, bubble: -25, stir: -28, river: -25, waterfall: -21, lava: -23, vent: -25, athanor: -18, shade: -23, rain: -25, levity: -28 };
 const PARAM_LOOPS = new Set(['fire', 'bubble', 'stir', 'athanor', 'shade']);
-// Music: the loudest three seconds of the first half minute at intensity 0.7.
-const MOOD_DB = { title: -22, vale: -24, saltwood: -26, mere: -24, scar: -22, heights: -26, night: -27, gloom: -21, brew: -25, opus: -19, ending: -21 };
+// Music: the loudest three seconds of the first minute and a half at intensity 0.7, which is
+// long enough to reach the fullest strain of every piece.
+const MOOD_SECS = 90;
+const MOOD_DB = { title: -18, vale: -19.5, saltwood: -21, mere: -20, scar: -18, heights: -20.5, night: -22, gloom: -18.5, brew: -21, opus: -16, ending: -17 };
 
 const AMBIENCES = {
   calm: { region: 'vale', wind: 0, height: 20 },
@@ -55,10 +59,20 @@ async function render(seconds, setup, o = {}) {
   const a = createAudio({ context: ctx, seed: o.seed ?? 7, mute: o.mute || [], bypassLimiter: !!o.raw });
   a.setVolumes({ master: 1, music: 1, sfx: 1 });
   setup(a);
-  a.advance(seconds);
-  const debug = a.debug();
+  // o.step: schedule the way the game does, a few seconds ahead of the clock, so that a long piece
+  // of music does not sit in the graph all at once
+  if (o.step) {
+    a.advance(o.step + 2);
+    for (let t = o.step; t < seconds; t += o.step) {
+      ctx.suspend(t).then(() => {
+        a.advance(t + o.step + 2);
+        ctx.resume();
+      });
+    }
+  } else a.advance(seconds);
+  const before = a.debug();
   const buf = await ctx.startRendering();
-  return { buf, debug };
+  return { buf, debug: o.step ? a.debug() : before };
 }
 
 // --- measuring ------------------------------------------------------------------------------------
@@ -225,10 +239,25 @@ async function loopStats(name) {
   const { buf } = await render(6, (a) => a.loop(name, { param: p ? 0.15 : 0.5 }).set({ param: p ? 1 : 0.5 }, 3), DRY);
   return { name, k: LOOPS[name].k, target: LOOP_DB[name] ?? null, param: p, low: analyse(buf, { from: 1.2, to: 3, window: true }), high: analyse(buf, { from: 4.2, to: 6, window: true }) };
 }
-async function moodStats(mood, secs = 30, intensity = 0.7, seed = 7) {
+/** One mood alone. solo: the name of one player of it, to hear how that one sits in the band. */
+async function moodStats(mood, secs = MOOD_SECS, intensity = 0.7, seed = 7, solo = null) {
   const t0 = performance.now();
-  const { buf, debug } = await render(secs, (a) => a.setMusic(mood, { intensity }), { raw: true, mute: ['amb'], seed });
-  return { name: mood, k: MOOD_K[mood] ?? 1, target: MOOD_DB[mood] ?? null, ms: Math.round(performance.now() - t0), sources: debug.made, ...analyse(buf, { window: true }) };
+  DEV.solo = solo;
+  try {
+    const { buf, debug } = await render(secs, (a) => a.setMusic(mood, { intensity }), { raw: true, mute: ['amb'], seed, step: 4 });
+    return { name: solo || mood, k: MOOD_K[mood] ?? 1, target: MOOD_DB[mood] ?? null, ms: Math.round(performance.now() - t0), sources: debug.made, ...analyse(buf, { window: true }), above150Db: rmsAbove(buf, 150) };
+  } finally {
+    DEV.solo = null;
+  }
+}
+/** Every player of a mood (or only the named ones), each alone: the balance of the band, in numbers. */
+async function players(mood, secs = MOOD_SECS, intensity = 1, only = null) {
+  const out = [];
+  for (const name of Object.keys(PIECES[mood].tracks)) {
+    if (only && !only.includes(name)) continue;
+    out.push({ from: PIECES[mood].tracks[name].from || 0, ...(await moodStats(mood, secs, intensity, 7, name)), shape: undefined });
+  }
+  return out;
 }
 /** RMS in dB of what is left above `hz` (two one-pole high-passes): the part small speakers can play. */
 function rmsAbove(buf, hz, from = 0) {
@@ -424,7 +453,7 @@ async function placing() {
   out.cost = { loops: 14, stillMs: Math.round(Math.min(...still)), movingMs: Math.round(Math.min(...moving)), extraShare: r3((Math.min(...moving) - Math.min(...still)) / (SECS * 1000)) };
   return out;
 }
-/** A long stretch of one mood: the level every five seconds, to see phrases and rests. */
+/** A long stretch of one mood: the level every five seconds, to see the strains come and go. */
 async function long(mood, secs = 600, intensity = 0.6, seed = 11) {
   const t0 = performance.now();
   // scheduled the way the game does it, a little ahead of the clock, so that the graph stays small
@@ -471,6 +500,8 @@ async function long(mood, secs = 600, intensity = 0.6, seed = 11) {
     name: mood, secs, ms: Math.round(performance.now() - t0), sources: debug.made, peakDb: st.peakDb, rmsDb: st.rmsDb, nan: st.nan,
     medianDb: sorted[sorted.length >> 1],
     quietShare: r3(trace.filter((v) => v < sorted[sorted.length - 1] - 12).length / trace.length),
+    // how far the fuller stretches stand above the thinner ones: the tenth of the time that is loudest against the tenth that is quietest
+    spanDb: r1(sorted[Math.floor(sorted.length * 0.9)] - sorted[Math.floor(sorted.length * 0.1)]),
     firstHalfDb: r1(trace.slice(0, trace.length >> 1).reduce((a, b) => a + b, 0) / (trace.length >> 1)),
     secondHalfDb: r1(trace.slice(trace.length >> 1).reduce((a, b) => a + b, 0) / (trace.length - (trace.length >> 1))),
     trace,
@@ -493,7 +524,7 @@ async function heard(kind, name, o = {}) {
       h.stop(1, 7.5);
     }, { mute: ['amb', 'music'] })).buf;
   }
-  if (kind === 'mood') return (await render(o.secs || 60, (a) => a.setMusic(name, { intensity: o.intensity ?? 0.7 }), { mute: ['amb'], seed: o.seed })).buf;
+  if (kind === 'mood') return (await render(o.secs || 60, (a) => a.setMusic(name, { intensity: o.intensity ?? 0.7 }), { mute: ['amb'], seed: o.seed, step: 4 })).buf;
   if (kind === 'amb') return (await render(o.secs || 30, (a) => a.setAmbience(AMBIENCES[name]), { mute: ['music'], seed: o.seed })).buf;
   if (kind === 'burst') return (await render(7, (a) => {
     for (let i = 0; i < 30; i++) a.sfx(LOUDEST[i % LOUDEST.length], { at: START + i * 0.01 });
@@ -877,7 +908,7 @@ async function soak(seconds = 180) {
   };
 }
 
-window.AUD = { NAMES, AMBIENCES, SFX_DB, LOOP_DB, MOOD_DB, MASTER, render, analyse, sfxStats, loopStats, moodStats, ambStats, burst, mix, chain, makeup, reverb, pause, placing, long, heard, shot, wav, live, soak, errors, warnings };
+window.AUD = { NAMES, AMBIENCES, SFX_DB, LOOP_DB, MOOD_DB, MOOD_SECS, MASTER, render, analyse, sfxStats, loopStats, moodStats, players, ambStats, burst, mix, chain, makeup, reverb, pause, placing, long, heard, shot, wav, live, soak, errors, warnings };
 
 // --- the board ------------------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);

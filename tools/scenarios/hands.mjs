@@ -8,6 +8,11 @@ export default async function ({ ev, log, page, shot }) {
     });
   await page.waitForTimeout(3500);
   log('title', JSON.stringify(await st()));
+  // A plain lock for this run. With raw movement (which the game asks for first, see raw.mjs) this
+  // window hears the real mouse of the machine it runs on, and the angles below are not ours alone.
+  await ev(() => {
+    TP.game.input.raw = false;
+  });
 
   // the title: move over the entries, click Begin
   const begin = page.getByText('Begin', { exact: true }).first();
